@@ -5,7 +5,7 @@
 
 // Define grid size and mine count
 const int GRID_SIZE = 10;
-const int NUM_MINES = 10; // You can adjust the number of mines as needed
+int NUM_MINES = 10; // You can adjust the number of mines as needed
 const int CELL_SIZE = 30; // Define cell size
 int windowWidth = CELL_SIZE * GRID_SIZE + 30;
 int windowHeight = CELL_SIZE * GRID_SIZE + 160;
@@ -22,6 +22,29 @@ HWND hLabel = NULL; // Global variable to store the label control handle
 HWND hMineLabel = NULL;
 HWND hRestartButton = NULL;
 HWND hExitButton = NULL;
+HWND hUtilityWnd = NULL;
+HWND hDialogButton = NULL;
+HWND hComboBox = NULL;
+
+// Define constants for difficulty levels
+enum Difficulty {
+    Noob = 1,
+    Easy = 5,
+    Normal = 10,
+    Hard = 15,
+    Pain = 20
+};
+
+Difficulty currentDifficulty = Normal; // Default difficulty
+
+HHOOK g_hHook = NULL;
+HWND g_hMainWindow = NULL;
+bool g_bUtilityWindowVisible = false;
+
+void ToggleUtilityWindowVisibility() {
+    g_bUtilityWindowVisible = !g_bUtilityWindowVisible;
+    ShowWindow(hUtilityWnd, g_bUtilityWindowVisible ? SW_SHOW : SW_HIDE);
+}
 
 // Function to randomly place mines on the grid
 void PlaceMines() {
@@ -199,6 +222,41 @@ void YouDied() {
     GameOver = true;
 }
 
+void RestartGame(Difficulty newDifficulty) {
+    // Reset game variables and redraw the grid
+    GameOver = false;
+    isMine.assign(GRID_SIZE * GRID_SIZE, false);
+    isFlagged.assign(GRID_SIZE * GRID_SIZE, false);
+    isChecked.assign(GRID_SIZE * GRID_SIZE, false);
+
+    switch (newDifficulty) {
+    case 1:
+        NUM_MINES = 1;
+        break;
+    case 2:
+        NUM_MINES = 5;
+        break;
+    case 3:
+        NUM_MINES = 10;
+        break;
+    case 4:
+        NUM_MINES = 15;
+        break;
+    case 5:
+        NUM_MINES = 20;
+        break;
+    }
+
+    PlaceMines();
+    InvalidateRect(g_hMainWindow, NULL, FALSE);
+    SetWindowText(hLabel, L""); // Clear the label
+    remainingMines = NUM_MINES;
+    flaggedMines = 0;
+    wchar_t mineCountStr[50];
+    swprintf_s(mineCountStr, L"Mines Remaining: %d", NUM_MINES - flaggedMines);
+    SetWindowText(hMineLabel, mineCountStr);
+}
+
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
     case WM_CREATE:
@@ -324,11 +382,80 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
     return 0;
 }
 
+LRESULT CALLBACK KeyboardHook(int nCode, WPARAM wParam, LPARAM lParam) {
+    if (nCode == HC_ACTION && (wParam == WM_KEYDOWN || wParam == WM_SYSKEYDOWN)) {
+        KBDLLHOOKSTRUCT* pKeyInfo = (KBDLLHOOKSTRUCT*)lParam;
+        if (pKeyInfo->vkCode == 'H') { // Check for the "H" key
+            ToggleUtilityWindowVisibility(); // Toggle the Utility Window's visibility
+        }
+    }
+    return CallNextHookEx(g_hHook, nCode, wParam, lParam);
+}
+
+// Utility Window procedure
+LRESULT CALLBACK UtilityWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    switch (message) {
+    case WM_CREATE:
+        // Create the "Show Dialog" button
+        hDialogButton = CreateWindow(L"BUTTON", L"Show Dialog", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            10, 10, 100, 30, hWnd, (HMENU)2001, NULL, NULL);
+
+        // Create the combo box
+        hComboBox = CreateWindow(L"COMBOBOX", NULL, WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+            120, 10, 120, 200, hWnd, (HMENU)2002, NULL, NULL);
+
+        // Add difficulty levels to the combo box
+        SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)L"Noob");
+        SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)L"Easy");
+        SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)L"Normal");
+        SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)L"Hard");
+        SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)L"Pain");
+
+        // Set the default selection
+        SendMessage(hComboBox, CB_SETCURSEL, currentDifficulty - 1, 0);
+        g_hHook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardHook, NULL, 0);
+        break;
+
+    case WM_COMMAND:
+        switch (LOWORD(wParam)) {
+        case 2001: // Show Dialog button
+            MessageBox(hWnd, L"ЛКМ - открыть клетку, ПКМ - поставить флаг, H - открыть меню", L"Game Instructions", MB_OK);
+            break;
+        case 2002: // Combo box selection
+            if (HIWORD(wParam) == CBN_SELCHANGE) {
+                // Get the selected difficulty level
+                int selected = SendMessage(hComboBox, CB_GETCURSEL, 0, 0);
+                if (selected != CB_ERR) {
+                    // Update the current difficulty
+                    currentDifficulty = static_cast<Difficulty>(selected + 1);
+                    RestartGame(currentDifficulty); // Restart with the new difficulty
+                }
+            }
+            break;
+        }
+        break;
+
+    case WM_CLOSE:
+        // Hide the Utility Window instead of closing it
+        ShowWindow(hUtilityWnd, SW_HIDE);
+        break;
+
+    case WM_DESTROY:
+        // Post a quit message for the Utility Window
+        PostQuitMessage(0);
+        break;
+
+    default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
+    }
+    return 0;
+}
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
-    // Define the window class
+    // Define the window class for the main window
     WNDCLASSEX wcex = { sizeof(WNDCLASSEX), CS_HREDRAW | CS_VREDRAW, WndProc, 0, 0, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, L"GridWindowClass", NULL };
 
-    // Register the window class
+    // Register the window class for the main window
     RegisterClassEx(&wcex);
 
     // Create the application window with a fixed size
@@ -343,6 +470,27 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
 
+    // Set the global main window handle
+    g_hMainWindow = hWnd;
+
+    // Register the window class for the Utility Window
+    WNDCLASSEX wcexUtility = { sizeof(WNDCLASSEX), CS_HREDRAW | CS_VREDRAW, UtilityWndProc, 0, 0, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, L"UtilityWindowClass", NULL };
+    RegisterClassEx(&wcexUtility);
+
+    // Create the Utility Window
+    hUtilityWnd = CreateWindow(L"UtilityWindowClass", L"Utility Window", WS_OVERLAPPEDWINDOW,
+        CW_USEDEFAULT, CW_USEDEFAULT, 300, 100, NULL, NULL, hInstance, NULL);
+
+    if (!hUtilityWnd) {
+        return -1;
+    }
+
+    // Show and update the Utility Window
+    ShowWindow(hUtilityWnd, SW_HIDE); // Initially hide the Utility Window
+    UpdateWindow(hUtilityWnd);
+
+    // ...
+
     // Message loop
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
@@ -352,5 +500,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     return (int)msg.wParam;
 }
+
 
 
