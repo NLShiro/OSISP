@@ -1,7 +1,11 @@
 #include <windows.h>
-#include <windowsx.h> // Include windowsx.h for GET_X_LPARAM and GET_Y_LPARAM
+#include <windowsx.h>
 #include <vector>
 #include <ctime>
+#include <string>
+#include <fstream>
+#include <sstream>
+#include <thread>
 
 // Define grid size and mine count
 const int GRID_SIZE = 10;
@@ -27,15 +31,89 @@ HWND hDialogButton = NULL;
 HWND hComboBox = NULL;
 
 // Define constants for difficulty levels
-enum Difficulty {
+/*enum Difficulty {
     Noob = 1,
     Easy = 5,
     Normal = 10,
     Hard = 15,
     Pain = 20
-};
+};*/
 
-Difficulty currentDifficulty = Normal; // Default difficulty
+std::vector<std::pair<std::wstring, int>> Difficulty;
+
+int currentDifficulty = 3; // Default difficulty
+
+void SaveTextToFile(const std::wstring& textCharacters, const std::wstring& textIntegers) {
+    // Open a file for writing using WinAPI
+
+    HANDLE hFile = CreateFile(L"difficulties", GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    if (hFile != INVALID_HANDLE_VALUE) {
+        std::wstring fileData = L"\n" + textCharacters + L"\n" + textIntegers;
+        DWORD bytesWritten;
+
+        // Move to the end of the file
+        SetFilePointer(hFile, 0, NULL, FILE_END);
+
+        if (WriteFile(hFile, fileData.c_str(), fileData.size() * sizeof(wchar_t), &bytesWritten, NULL)) {
+            MessageBox(NULL, L"Text saved to 'difficulties'", L"Save Successful", MB_OK | MB_ICONINFORMATION);
+        }
+        else {
+            MessageBox(NULL, L"Failed to write to the file!", L"Save Error", MB_OK | MB_ICONERROR);
+        }
+
+        CloseHandle(hFile);
+    }
+    else {
+        MessageBox(NULL, L"Failed to create or open the file for writing!", L"Save Error", MB_OK | MB_ICONERROR);
+    }
+}
+
+
+void LoadDifficultiesFromFile() {
+    Difficulty.push_back(std::pair<std::wstring, int>(L"Noob", 1));
+    Difficulty.push_back(std::pair<std::wstring, int>(L"Easy", 5));
+    Difficulty.push_back(std::pair<std::wstring, int>(L"Normal", 10));
+    Difficulty.push_back(std::pair<std::wstring, int>(L"Hard", 15));
+    Difficulty.push_back(std::pair<std::wstring, int>(L"Pain", 20));
+
+    HANDLE hFile = CreateFile(L"difficulties", GENERIC_READ, 0, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
+
+    if (hFile != INVALID_HANDLE_VALUE) {
+        std::wstring fileData;
+        DWORD bytesRead;
+
+        fileData.resize(GetFileSize(hFile, NULL));
+
+        if (ReadFile(hFile, &fileData[0], GetFileSize(hFile, NULL), &bytesRead, NULL)) {
+            std::wstringstream ss(fileData);
+            std::wstring line;
+
+            while (std::getline(ss, line)) {
+                if (line == L"[" || line == L"]") {
+                    continue;
+                }
+                else {
+                    std::wstring namebuffer = line;
+                    std::getline(ss, line);
+                    std::wstring numbuffer = line;
+                    Difficulty.push_back(std::pair<std::wstring, int>(namebuffer, stoi(numbuffer)));
+                }
+            }
+        }
+        else {
+            MessageBox(NULL, L"Failed to read from the file!", L"Load Error", MB_OK | MB_ICONERROR);
+        }
+
+        CloseHandle(hFile);
+    }
+    else {
+        CreateFile(L"difficulties", GENERIC_READ, 0, NULL, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, NULL);
+        // Handle the case where the file does not exist
+        // You can create a default difficulty file here if needed.
+    }
+}
+
 
 HHOOK g_hHook = NULL;
 HWND g_hMainWindow = NULL;
@@ -120,7 +198,6 @@ void DrawGridCells(HDC hdc) {
             // Delete the brush
             DeleteObject(hBrush);
 
-            // You can add logic here to draw mines and safe spaces based on the game state
         }
     }
 }
@@ -222,30 +299,14 @@ void YouDied() {
     GameOver = true;
 }
 
-void RestartGame(Difficulty newDifficulty) {
+void RestartGame() {
     // Reset game variables and redraw the grid
     GameOver = false;
     isMine.assign(GRID_SIZE * GRID_SIZE, false);
     isFlagged.assign(GRID_SIZE * GRID_SIZE, false);
     isChecked.assign(GRID_SIZE * GRID_SIZE, false);
 
-    switch (newDifficulty) {
-    case 1:
-        NUM_MINES = 1;
-        break;
-    case 2:
-        NUM_MINES = 5;
-        break;
-    case 3:
-        NUM_MINES = 10;
-        break;
-    case 4:
-        NUM_MINES = 15;
-        break;
-    case 5:
-        NUM_MINES = 20;
-        break;
-    }
+    NUM_MINES = Difficulty[currentDifficulty].second;
 
     PlaceMines();
     InvalidateRect(g_hMainWindow, NULL, FALSE);
@@ -256,6 +317,70 @@ void RestartGame(Difficulty newDifficulty) {
     swprintf_s(mineCountStr, L"Mines Remaining: %d", NUM_MINES - flaggedMines);
     SetWindowText(hMineLabel, mineCountStr);
 }
+
+void LaunchNewInstance() {
+    std::thread newInstanceThread([]() {
+        HINSTANCE hInstance = GetModuleHandle(NULL);
+
+        // Reset game variables and redraw the grid
+        GameOver = false;
+        isMine.assign(GRID_SIZE * GRID_SIZE, false);
+        isFlagged.assign(GRID_SIZE * GRID_SIZE, false);
+        isChecked.assign(GRID_SIZE * GRID_SIZE, false);
+
+        NUM_MINES = Difficulty[currentDifficulty].second;
+
+        PlaceMines();
+        InvalidateRect(g_hMainWindow, NULL, FALSE);
+        SetWindowText(hLabel, L""); // Clear the label
+        remainingMines = NUM_MINES;
+        flaggedMines = 0;
+        wchar_t mineCountStr[50];
+        swprintf_s(mineCountStr, L"Mines Remaining: %d", NUM_MINES - flaggedMines);
+        SetWindowText(hMineLabel, mineCountStr);
+
+        // Create a new main window instance with default options
+        WinMain(hInstance, NULL, NULL, SW_SHOWNORMAL);
+        });
+
+    // Detach the thread to allow it to run independently
+    newInstanceThread.detach();
+}
+
+/* void LaunchNewInstance() {
+    // Get the path to the current executable
+    wchar_t executablePath[MAX_PATH];
+    GetModuleFileName(NULL, executablePath, MAX_PATH);
+
+    // Define a struct to pass data to the new instance
+    struct LaunchData {
+        wchar_t executablePath[MAX_PATH];
+    };
+
+    LaunchData launchData;
+    wcscpy_s(launchData.executablePath, MAX_PATH, executablePath);
+
+    // Create a new thread for the new instance
+    HANDLE hThread = CreateThread(NULL, 0, [](LPVOID data) -> DWORD {
+        LaunchData* launchData = static_cast<LaunchData*>(data);
+
+        // CreateProcess to launch the new instance
+        STARTUPINFO si = {};
+        PROCESS_INFORMATION pi = {};
+        if (CreateProcess(launchData->executablePath, NULL, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+            // Close handles to avoid resource leaks
+            CloseHandle(pi.hProcess);
+            CloseHandle(pi.hThread);
+        }
+
+        return 0;
+        }, &launchData, 0, NULL);
+
+    if (hThread) {
+        // Close the thread handle to avoid resource leaks
+        CloseHandle(hThread);
+    }
+}*/
 
 LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
     switch (message) {
@@ -295,6 +420,7 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
             wchar_t mineCountStr[50];
             swprintf_s(mineCountStr, L"Mines Remaining: %d", NUM_MINES - flaggedMines);
             SetWindowText(hMineLabel, mineCountStr);
+            LoadDifficultiesFromFile();
             break;
         case 1002: // Exit button
             // Close the application
@@ -394,25 +520,44 @@ LRESULT CALLBACK KeyboardHook(int nCode, WPARAM wParam, LPARAM lParam) {
 
 // Utility Window procedure
 LRESULT CALLBACK UtilityWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+    static HWND hEdit = NULL; // Input for characters
+    static HWND hIntEdit = NULL; // Input for integers
+    static std::wstring textCharacters;
+    static std::wstring textIntegers;
+
     switch (message) {
     case WM_CREATE:
         // Create the "Show Dialog" button
         hDialogButton = CreateWindow(L"BUTTON", L"Show Dialog", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
             10, 10, 100, 30, hWnd, (HMENU)2001, NULL, NULL);
 
-        // Create the combo box
-        hComboBox = CreateWindow(L"COMBOBOX", NULL, WS_CHILD | WS_VISIBLE | CBS_DROPDOWNLIST,
+        // Create the edit control for the first input (characters)
+        hEdit = CreateWindow(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL,
+            10, 50, 200, 30, hWnd, (HMENU)2003, NULL, NULL);
+
+        // Create another edit control for the second input (integers)
+        hIntEdit = CreateWindow(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_NUMBER,
+            10, 90, 80, 30, hWnd, (HMENU)2004, NULL, NULL);
+
+        // Create a "Save" button
+        CreateWindow(L"BUTTON", L"Save", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            10, 130, 80, 30, hWnd, (HMENU)2005, NULL, NULL);
+
+        hComboBox = CreateWindow(L"COMBOBOX", NULL, WS_CHILD | WS_VISIBLE | CBS_DROPDOWN,
             120, 10, 120, 200, hWnd, (HMENU)2002, NULL, NULL);
 
-        // Add difficulty levels to the combo box
-        SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)L"Noob");
-        SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)L"Easy");
-        SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)L"Normal");
-        SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)L"Hard");
-        SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)L"Pain");
+        // Create the "Launch new instance" button
+        CreateWindow(L"BUTTON", L"Launch new instance", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON,
+            10, 170, 100, 30, hWnd, (HMENU)2006, NULL, NULL);
 
-        // Set the default selection
-        SendMessage(hComboBox, CB_SETCURSEL, currentDifficulty - 1, 0);
+        // Add difficulty levels to the combo box
+        for (size_t i = 0; i < Difficulty.size(); ++i) {
+            SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)Difficulty[i].first.c_str());
+        }
+
+        // Select the current difficulty in the combo box
+        SendMessage(hComboBox, CB_SETCURSEL, static_cast<WPARAM>(currentDifficulty) - 1, 0);
+
         g_hHook = SetWindowsHookEx(WH_KEYBOARD_LL, KeyboardHook, NULL, 0);
         break;
 
@@ -421,16 +566,47 @@ LRESULT CALLBACK UtilityWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
         case 2001: // Show Dialog button
             MessageBox(hWnd, L"ЛКМ - открыть клетку, ПКМ - поставить флаг, H - открыть меню", L"Game Instructions", MB_OK);
             break;
+        case 2005: // Save button
+        {
+            const int bufferSize = 256; // Adjust the buffer size as needed
+            wchar_t buffer[bufferSize];
+
+            // Get text from the character input field
+            GetWindowText(hEdit, buffer, bufferSize);
+            textCharacters = buffer;
+
+            // Get text from the integer input field
+            GetWindowText(hIntEdit, buffer, bufferSize);
+            textIntegers = buffer;
+
+            // Append the text to the difficultyEntries vector
+            Difficulty.push_back(std::pair<std::wstring, int>(textCharacters, stoi(textIntegers)));
+
+            // Save the text to the file
+            SaveTextToFile(textCharacters, textIntegers);
+
+            // Update the combo box with the new difficulty entry
+            SendMessage(hComboBox, CB_ADDSTRING, 0, (LPARAM)Difficulty.back().first.c_str());
+
+            // Clear input fields
+            SetWindowText(hEdit, L"");
+            SetWindowText(hIntEdit, L"");
+
+            break;
+        }
         case 2002: // Combo box selection
             if (HIWORD(wParam) == CBN_SELCHANGE) {
                 // Get the selected difficulty level
                 int selected = SendMessage(hComboBox, CB_GETCURSEL, 0, 0);
                 if (selected != CB_ERR) {
                     // Update the current difficulty
-                    currentDifficulty = static_cast<Difficulty>(selected + 1);
-                    RestartGame(currentDifficulty); // Restart with the new difficulty
+                    currentDifficulty = selected;
+                    RestartGame(); // Restart with the new difficulty
                 }
             }
+            break;
+        case 2006: // Launch new instance button
+            LaunchNewInstance();
             break;
         }
         break;
@@ -451,6 +627,9 @@ LRESULT CALLBACK UtilityWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM l
     return 0;
 }
 
+
+
+
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow) {
     // Define the window class for the main window
     WNDCLASSEX wcex = { sizeof(WNDCLASSEX), CS_HREDRAW | CS_VREDRAW, WndProc, 0, 0, GetModuleHandle(NULL), NULL, NULL, NULL, NULL, L"GridWindowClass", NULL };
@@ -466,6 +645,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
         return -1;
     }
 
+    LoadDifficultiesFromFile();
     // Show and update the window
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
@@ -479,7 +659,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     // Create the Utility Window
     hUtilityWnd = CreateWindow(L"UtilityWindowClass", L"Utility Window", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 300, 100, NULL, NULL, hInstance, NULL);
+        CW_USEDEFAULT, CW_USEDEFAULT, 500, 400, NULL, NULL, hInstance, NULL);
 
     if (!hUtilityWnd) {
         return -1;
@@ -489,9 +669,6 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     ShowWindow(hUtilityWnd, SW_HIDE); // Initially hide the Utility Window
     UpdateWindow(hUtilityWnd);
 
-    // ...
-
-    // Message loop
     MSG msg;
     while (GetMessage(&msg, NULL, 0, 0)) {
         TranslateMessage(&msg);
@@ -500,6 +677,3 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
 
     return (int)msg.wParam;
 }
-
-
-

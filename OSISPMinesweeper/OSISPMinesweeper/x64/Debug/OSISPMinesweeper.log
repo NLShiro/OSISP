@@ -1,3 +1,4 @@
 ﻿  Main Interface.cpp
-D:\OSISP\OSISPMinesweeper\OSISPMinesweeper\Main Interface.cpp(427,30): warning C4244: 'initializing': conversion from 'LRESULT' to 'int', possible loss of data
-  OSISPMinesweeper.vcxproj -> D:\OSISP\OSISPMinesweeper\x64\Debug\OSISPMinesweeper.exe
+C:\OSISP\OSISPMinesweeper\OSISPMinesweeper\Main Interface.cpp(58,64): warning C4267: 'argument': conversion from 'size_t' to 'DWORD', possible loss of data
+C:\OSISP\OSISPMinesweeper\OSISPMinesweeper\Main Interface.cpp(600,30): warning C4244: 'initializing': conversion from 'LRESULT' to 'int', possible loss of data
+  OSISPMinesweeper.vcxproj -> C:\OSISP\OSISPMinesweeper\x64\Debug\OSISPMinesweeper.exe
